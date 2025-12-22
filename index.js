@@ -20,15 +20,24 @@ bot.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
 
   const welcomeText = `
-🔥 *Welcome to BitcoinFun* 🔥
+🚀 Welcome to BitcoinFun 💎
 
-🎮 Play daily BTC rounds
-💰 Grow in-game capital
-🤝 Invite friends & unlock rewards
-⏳ One round every 12 hours
+Where smart moves meet daily rewards.
 
-⚠️ *This is a simulation game*
-`;
+🔥 No charts
+🔥 No stress
+🔥 Just clean BTC rounds powered by a smart engine
+
+💼 Start with your capital
+🎯 Play 1 BTC round every 12 hours
+📈 Watch your numbers grow — smoothly, consistently
+
+💎 This isn’t luck.
+⚙️ It’s a system.
+🎮 And you’re inside the game now.
+
+👇 Tap below & unlock your first BTC round
+Stay active. Stay sharp. Stay winning. 😈💰
 
   bot.sendMessage(chatId, welcomeText, {
     parse_mode: "Markdown",
