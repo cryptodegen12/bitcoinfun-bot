@@ -1,6 +1,7 @@
 {
   "name": "bitcoinfun-bot",
   "version": "1.0.0",
+  "description": "BitcoinFun Telegram Bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
