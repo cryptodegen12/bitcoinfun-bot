@@ -1,3 +1,10 @@
+const express = require('express');
+const app = express();
+const PORT = process.env.PORT || 3000; // Uses Render's port automatically!
+
+app.get('/', (req, res) => res.send('Bot is Alive!'));
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
 // index.js - BitcoinFun Telegram Game Bot
 require('dotenv').config();
 const { Telegraf, Markup, session } = require('telegraf');
