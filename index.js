@@ -227,4 +227,5 @@ process.once('SIGTERM', () => bot.stop('SIGTERM'));
 console.log('🚀 BitcoinFun bot starting...');
 bot.launch();
 
-console.log('✅ Bot running 24/7 ready for Render deployment!'); [web:11][memory:4][web:19]
+console.log('✅ Bot running 24/7 ready for Render deployment!');
+
