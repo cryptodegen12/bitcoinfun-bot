@@ -104,10 +104,15 @@ bot.action("trade", async (ctx) => {
   );
 });
 
-bot.action(["trade_up", "trade_down"], async (ctx) => {
-  const uid = String(ctx.from.id);
-  const ref = userRef(uid);
-  const user = (await ref.get()).data();
+  // ❌ BLOCK TRADE IF NO DEPOSIT
+  if (user.deposited < 35) {
+    return ctx.reply(
+      "🚫 *Trading Locked*\n\n" +
+      "You must activate your account with a minimum deposit of *$35* to access Smart Trades.\n\n" +
+      "💎 Click *ADD CAPITAL* to unlock trading.",
+      { parse_mode: "Markdown" }
+    );
+  }
 
   const now = Date.now();
   if (now - user.lastTrade < 12 * 60 * 60 * 1000) {
