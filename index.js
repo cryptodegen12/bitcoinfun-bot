@@ -176,11 +176,51 @@ bot.on('text', async (ctx, next) => {
   }
 
   // Support message flow
-  if (ctx.session?.waitingForSupport) {
-    ctx.session.waitingForSupport = false;
-    await bot.telegram.sendMessage(ADMIN_ID, `🆘 SUPPORT\nFrom: @${ctx.from.username}\nID: ${userId}\n\nMsg: ${ctx.message.text}`);
-    return ctx.reply("✅ Support ticket sent to Admin.");
+  bot.on("text", async (ctx) => {
+  const mode = ctx.session?.mode;
+
+  // SUPPORT MODE
+  if (mode === "support") {
+    await bot.telegram.sendMessage(
+      ADMIN_ID,
+      `🆘 SUPPORT MESSAGE\nUser: ${ctx.from.id}\nMessage: ${ctx.message.text}`
+    );
+    ctx.session.mode = null;
+    return ctx.reply("✅ Support message sent to Admin.");
   }
+
+  // DEPOSIT AMOUNT MODE
+  if (mode === "deposit_amount") {
+    const amount = Number(ctx.message.text);
+    if (isNaN(amount) || amount < 35) {
+      return ctx.reply("❌ Invalid amount. Minimum deposit is $35.");
+    }
+    ctx.session.depositAmount = amount;
+    ctx.session.mode = "deposit_proof";
+    return ctx.reply("📸 Upload payment screenshot.");
+  }
+
+  // WITHDRAW AMOUNT MODE
+  if (mode === "withdraw_amount") {
+    const amount = Number(ctx.message.text);
+    if (isNaN(amount) || amount < 30) {
+      return ctx.reply("❌ Invalid withdrawal amount.");
+    }
+    ctx.session.withdrawAmount = amount;
+    ctx.session.mode = "withdraw_address";
+    return ctx.reply("📥 Send your BEP20 wallet address:");
+  }
+
+  // WITHDRAW ADDRESS MODE
+  if (mode === "withdraw_address") {
+    await bot.telegram.sendMessage(
+      ADMIN_ID,
+      `💸 WITHDRAW REQUEST\nUser: ${ctx.from.id}\nAmount: $${ctx.session.withdrawAmount}\nAddress: ${ctx.message.text}`
+    );
+    ctx.session.mode = null;
+    return ctx.reply("✅ Withdrawal request sent to Admin.");
+  }
+});
 
   // otherwise pass-through
   return next();
@@ -412,7 +452,7 @@ bot.on('text', async (ctx) => {
 // ---------------- SUPPORT ----------------
 bot.action('support_chat', (ctx) => {
   ctx.session = ctx.session || {};
-  ctx.session.waitingForSupport = true;
+  ctx.session.mode = "support";
   ctx.reply("📝 Type your message for Admin (support):");
 });
 
