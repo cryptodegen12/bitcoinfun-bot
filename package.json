@@ -1,7 +1,7 @@
 {
-  "name": "bitcoinfun",
+  "name": "Goldentreasure",
   "version": "1.0.0",
-  "description": "BitcoinFun – Smart Liquidity based Telegram bot with Firebase backend",
+  "description": "Goldentreasure – Smart Liquidity based Telegram bot with Firebase backend",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
