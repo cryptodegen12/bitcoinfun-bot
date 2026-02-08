@@ -304,5 +304,5 @@ app.listen(process.env.PORT || 3000, "0.0.0.0");
 
 /* ================= LAUNCH ================= */
 bot.launch().then(function () {
-  console.log("🚀 BitcoinFun bot started successfully");
+  console.log("🚀 Goldentreasure bot started successfully");
 });
