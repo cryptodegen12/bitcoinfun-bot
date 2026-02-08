@@ -87,7 +87,7 @@ bot.start(async (ctx) => {
   }
 
   return ctx.reply(
-    "🚀 *BitcoinFun™ Smart Liquidity Engine*\n\n" +
+    "🚀 *Goldentreasure™ Smart Liquidity Engine*\n\n" +
       "⚡ Institutional-style liquidity simulation\n" +
       "🌊 Smart pool routing\n" +
       "🤖 Automated probability execution\n\n" +
@@ -297,7 +297,7 @@ bot.on(["photo", "document"], async (ctx) => {
 
 /* ================= SERVER ================= */
 app.get("/", function (req, res) {
-  res.send("BitcoinFun Bot LIVE");
+  res.send("Goldentreasure Bot LIVE");
 });
 
 app.listen(process.env.PORT || 3000, "0.0.0.0");
