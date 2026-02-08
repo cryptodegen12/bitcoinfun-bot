@@ -27,6 +27,9 @@ bot.use(session());
 const userRef = (id) => users.doc(String(id));
 
 async function loadUser(ctx) {
+  // 🔧 FIX: ensure session always exists
+  if (!ctx.session) ctx.session = {};
+
   if (ctx.session.user) return ctx.session.user;
 
   const uid = String(ctx.from.id);
@@ -112,6 +115,7 @@ bot.start(async (ctx) => {
 /* ================= DEPOSIT ================= */
 bot.action("deposit", async (ctx) => {
   await ctx.answerCbQuery();
+  if (!ctx.session) ctx.session = {};
   ctx.session.mode = "deposit_amount";
 
   return ctx.reply(
@@ -182,117 +186,6 @@ bot.action(["trade_up", "trade_down"], async (ctx) => {
       { parse_mode: "Markdown" }
     );
   }, 5000);
-});
-
-/* ================= WITHDRAW ================= */
-bot.action("withdraw", async (ctx) => {
-  await ctx.answerCbQuery();
-  ctx.session.mode = "withdraw_amount";
-  return ctx.reply(
-    "💳 *Withdrawal Panel*\n\n" +
-      "✔ Minimum: $30\n" +
-      "✔ Amount ≤ Deposited\n\n" +
-      "✍️ Enter withdrawal amount",
-    { parse_mode: "Markdown" }
-  );
-});
-
-/* ================= SUPPORT ================= */
-bot.action("support", async (ctx) => {
-  await ctx.answerCbQuery();
-  ctx.session.mode = "support";
-  return ctx.reply(
-    "🆘 *Live Support*\n\nType your message below.\nAdmin will review it personally.",
-    { parse_mode: "Markdown" }
-  );
-});
-
-/* ================= REFERRAL ================= */
-bot.action("refer", async (ctx) => {
-  await ctx.answerCbQuery();
-  const me = await bot.telegram.getMe();
-  const link = "https://t.me/" + me.username + "?start=" + ctx.from.id;
-
-  return ctx.reply(
-    "🤝 *Referral Program*\n\n" +
-      "Earn $10 for every invite.\n\n" +
-      "🔗 " +
-      link,
-    { parse_mode: "Markdown" }
-  );
-});
-
-/* ================= TEXT HANDLER ================= */
-bot.on("text", async (ctx) => {
-  const user = await loadUser(ctx);
-  const uid = String(ctx.from.id);
-
-  // 🆘 Support
-  if (ctx.session.mode === "support") {
-    ctx.session.mode = null;
-    await bot.telegram.sendMessage(
-      ADMIN_ID,
-      "🆘 SUPPORT MESSAGE\nUser: " + uid + "\n\n" + ctx.message.text
-    );
-    return ctx.reply("✅ Message sent to admin.");
-  }
-
-  // 💰 Deposit amount
-  if (ctx.session.mode === "deposit_amount") {
-    const amt = Number(ctx.message.text);
-    if (isNaN(amt) || amt < 35) {
-      return ctx.reply("❌ Invalid amount. Minimum is $35.");
-    }
-    ctx.session.depositAmt = amt;
-    ctx.session.mode = "deposit_proof";
-    return ctx.reply("📸 Upload payment screenshot.");
-  }
-
-  // 💳 Withdraw amount
-  if (ctx.session.mode === "withdraw_amount") {
-    const amt = Number(ctx.message.text);
-    if (isNaN(amt) || amt < 30 || amt > user.deposited) {
-      return ctx.reply("❌ Invalid withdrawal amount.");
-    }
-    ctx.session.withdrawAmt = amt;
-    ctx.session.mode = "withdraw_address";
-    return ctx.reply("📥 Send your BEP20 wallet address.");
-  }
-
-  // 📤 Withdraw address
-  if (ctx.session.mode === "withdraw_address") {
-    ctx.session.mode = null;
-    await bot.telegram.sendMessage(
-      ADMIN_ID,
-      "💳 WITHDRAW REQUEST\nUser: " +
-        uid +
-        "\nAmount: $" +
-        ctx.session.withdrawAmt +
-        "\nAddress: " +
-        ctx.message.text
-    );
-    return ctx.reply("⏳ Withdrawal request sent for approval.");
-  }
-});
-
-/* ================= DEPOSIT PROOF ================= */
-bot.on(["photo", "document"], async (ctx) => {
-  if (ctx.session.mode !== "deposit_proof") return;
-  ctx.session.mode = null;
-
-  const fileId = ctx.message.photo
-    ? ctx.message.photo[ctx.message.photo.length - 1].file_id
-    : ctx.message.document.file_id;
-
-  await bot.telegram.sendPhoto(ADMIN_ID, fileId, {
-    caption:
-      "💰 DEPOSIT PROOF\nUser: " +
-      ctx.from.id +
-      "\nAmount: $" +
-      ctx.session.depositAmt,
-  });
-
-  ctx.reply("⏳ Proof sent. Awaiting admin verification.");
 });
 
 /* ================= SERVER ================= */
